@@ -8,7 +8,7 @@ class FaceBox(object):
         self.input_shape = input_shape
         self.batch_size = input_shape[0]
         self.base_init = tf.contrib.layers.xavier_initializer() # Initialise weights
-        self.reg_init = tf.contrib.layers.l2_regularizer(scale=0.001) # Initialise regularisation
+        self.reg_init = tf.contrib.layers.l2_regularizer(scale=0.0005) # Initialise regularisation
         self.anchor_len = anchors_in.shape[0]
         self.anchors_bbox = tf.to_float(tf.constant(anchors_in))
         self.anchors_bbox_scale = anchors_scale
@@ -32,6 +32,7 @@ class FaceBox(object):
                                     name = name + 'conv_1_1',
                                     activation = tf.nn.leaky_relu,
                                     padding = 'SAME')
+            path_1 = tf.layers.batch_normalization(path_1, training = self.is_training, name = name + 'path_1_batch')
             path_2 = tf.layers.max_pooling2d(in_x, [3,3], 1, name = name+'pool_1_2',
                                     padding = 'SAME') # No striding to preserve shape
             path_2 = tf.layers.conv2d(path_2, 32, 
@@ -42,6 +43,7 @@ class FaceBox(object):
                                     name = name + 'conv_1_2',
                                     activation = tf.nn.leaky_relu,
                                     padding = 'SAME')
+            path_2 = tf.layers.batch_normalization(path_2, training = self.is_training, name = name + 'path_2_batch')
             if DEBUG: print('Path 2 shape: ', path_2.get_shape())
             path_3 = tf.layers.conv2d(in_x, 24, 
                                     kernel_size = [1, 1],
@@ -59,6 +61,7 @@ class FaceBox(object):
                                     name = name + 'conv_2_3',
                                     activation = tf.nn.leaky_relu,
                                     padding = 'SAME')
+            path_3 = tf.layers.batch_normalization(path_3, training = self.is_training, name = name + 'path_3_batch')
             if DEBUG: print('Path 3 shape: ', path_3.get_shape())
             path_4 = tf.layers.conv2d(in_x, 24, 
                             kernel_size = [1, 1],
@@ -84,6 +87,7 @@ class FaceBox(object):
                             name = name + 'conv_3_4',
                             activation = tf.nn.leaky_relu,
                             padding = 'SAME')
+            path_4 = tf.layers.batch_normalization(path_4, training = self.is_training, name = name + 'path_4_batch')                            
             if DEBUG: print('Path 4 shape: ', path_4.get_shape())
             return tf.concat([path_1, path_2, path_3, path_4], axis = -1)
 
@@ -119,7 +123,7 @@ class FaceBox(object):
         global_step = tf.Variable(0, trainable=False)
         self.i_plus  = tf.assign(global_step, global_step+1)
 
-        boundaries = [120000.0, 200000.0]
+        boundaries = [200000.0, 400000.0]
         values = [0.001, 0.0001, 0.00001]
         self.lr = tf.train.piecewise_constant(tf.to_float(global_step), boundaries, values, name = 'lr_select')
         self.global_iter_val = [global_step, self.lr]
@@ -141,6 +145,7 @@ class FaceBox(object):
                                 padding = 'SAME')
         conv_1_crelu = self.CReLU(conv_1, 'CReLU_1')
         conv_1_pool = tf.layers.max_pooling2d(conv_1_crelu, [3,3],2, name = 'Pool1',  padding = 'SAME')
+        conv_1_pool = tf.layers.batch_normalization(conv_1_pool, training = self.is_training, name = 'conv_1_pool_batch')
         if DEBUG: print('Conv 1 shape: ', conv_1_pool.get_shape())        
         conv_2 = tf.layers.conv2d(conv_1_pool, 64, 
                                 kernel_size = [5, 5],
@@ -151,6 +156,7 @@ class FaceBox(object):
                                 padding = 'SAME')
         conv_2_crelu = self.CReLU(conv_2, 'CReLU_2')
         conv_2_pool = tf.layers.max_pooling2d(conv_2_crelu, [3,3], 2, name = 'Pool2',  padding = 'SAME')
+        conv_2_pool = tf.layers.batch_normalization(conv_2_pool, training = self.is_training, name = 'conv_2_pool_batch')
         if DEBUG: print('Conv 2 shape: ', conv_2_pool.get_shape())
 
         print('Building Inception...')
@@ -172,6 +178,7 @@ class FaceBox(object):
                                 strides = 1,
                                 kernel_initializer=self.base_init,
                                 kernel_regularizer=self.reg_init,
+                                activation = tf.nn.leaky_relu,
                                 name = 'Conv3_1',
                                 padding = 'SAME')
         if DEBUG: print('Conv 3_1 shape: ', conv_3_1.get_shape())   
@@ -180,9 +187,10 @@ class FaceBox(object):
                                 strides = 2,
                                 kernel_initializer=self.base_init,
                                 kernel_regularizer=self.reg_init,
+                                activation = tf.nn.leaky_relu,
                                 name = 'Conv3_2',
                                 padding = 'SAME')
-
+        conv_3_2 = tf.layers.batch_normalization(conv_3_2, training = self.is_training, name = 'conv_3_2_batch')
         if DEBUG: print('Conv 3_2 anchors...')
         l, c = self.build_anchor(conv_3_2, 1, 'anchor_conv_3_2')
         bbox_locs.append(l)
@@ -194,14 +202,17 @@ class FaceBox(object):
                                 strides = 1,
                                 kernel_initializer=self.base_init,
                                 kernel_regularizer=self.reg_init,
+                                activation = tf.nn.leaky_relu,
                                 name = 'Conv4_1',
                                 padding = 'SAME')
         if DEBUG: print('Conv 4_1 shape: ', conv_4_1.get_shape())
+        conv_4_1 = tf.layers.batch_normalization(conv_4_1, training = self.is_training, name = 'conv_4_1_batch')
         conv_4_2 = tf.layers.conv2d(conv_4_1, 256, 
                                 kernel_size = [3, 3],
                                 strides = 2,
                                 kernel_initializer=self.base_init,
                                 kernel_regularizer=self.reg_init,
+                                activation = tf.nn.leaky_relu,
                                 name = 'Conv4_2',
                                 padding = 'SAME')
         if DEBUG: print('Conv 4_2 shape: ', conv_4_2.get_shape())
@@ -231,10 +242,11 @@ class FaceBox(object):
         tf.summary.scalar('Loss', self.loss)
         self.extra_update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
         with tf.control_dependencies(self.extra_update_ops):
-            self.train = tf.train.MomentumOptimizer(self.lr, momentum = 0.9, use_nesterov = True).minimize(self.loss)
+            self.train = tf.train.AdamOptimizer(self.lr, epsilon = 0.1).minimize(self.loss)
+            # self.train = tf.train.MomentumOptimizer(self.lr, momentum = 0.9, use_nesterov = True).minimize(self.loss)
         self.merged = tf.summary.merge_all()
 
-    def hard_negative_mining(self, conf_loss, pos_ids, mult = 3, min_negs = 1):
+    def hard_negative_mining(self, conf_loss, pos_ids, mult = 3, min_negs = 10):
         with tf.name_scope('hard_negative_mining') as scope:
             pos_ids = tf.unstack(pos_ids)
             neg_ids = [tf.logical_not(p) for p in pos_ids]
